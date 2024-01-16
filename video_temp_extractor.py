@@ -380,7 +380,7 @@ class TempEX():
 						res = re.findall(pattern, temp)
 						self.logger.debug("-- %d frame ocr result: %s" % (self.count,temp))
 						if len(res)==1:
-								temp_f = float(temp)
+								temp_f = float(res[0])
 								score = out['score']
 								self.prefer_ROI = index_ROI
 								if ii > 0:
