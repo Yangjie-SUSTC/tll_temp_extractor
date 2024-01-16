@@ -1,0 +1,8 @@
+cnocr==2.2.4.2
+matplotlib==3.7.3
+onnx==1.15.0
+onnxruntime==1.16.1
+opencv-python==4.8.1.78
+pytorch-lightning==2.1.0
+torch==2.1.0
+XlsxWriter==3.1.9
