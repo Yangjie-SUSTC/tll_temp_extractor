@@ -243,7 +243,7 @@ class TempEX():
 			#log = MyLogger('all.log', level='debug')
 
 			self.logger.info('***************load video %d in %s ********************************'%(self.vcount+1,vpath))
-			self.logger.info("** processing .... please wait %f s"%(frames_total*0.025/(self.dt*fps)))
+			self.logger.info("** processing .... please wait %f s"%(frames_total*0.25/(self.dt*fps)))
 			if capture.isOpened():
 				while True:
 					success, frame = capture.read()
