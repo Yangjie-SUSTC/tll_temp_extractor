@@ -1,0 +1,2 @@
+conda activate push
+python video_temp_extractor.py
