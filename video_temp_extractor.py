@@ -10,6 +10,10 @@ from matplotlib import pyplot as plt
 import json
 from cnocr import CnOcr
 import xlsxwriter as xw
+
+import numpy as np
+
+import pytesseract
 matplotlib.use('TkAgg')
 
 
@@ -35,6 +39,7 @@ class MyLogger(object):
 		sh.setLevel(self.level_relations.get(level))
 		sh.setFormatter(format_str)
 		self.logger.addHandler(sh)  # 把对象加到logger里
+
 		if log:
 			th = logging.FileHandler(log_path, encoding='UTF-8')
 			th.setFormatter(format_str)  # 设置文件里写入的格式
@@ -78,6 +83,10 @@ class TempEX():
 			self.save_last_frame=True
 		else:
 			self.save_last_frame=False
+
+		pytesseract.pytesseract.tesseract_cmd = para_dict['tesseract_cmd'] # your path may be different
+		self.max_dif_ratio=float(para_dict['max_dif_ratio'])
+		self.old_data = None
 
 		self.dpi=int(para_dict['dpi'])
 		self.dt = float(para_dict['dt'])
@@ -259,7 +268,7 @@ class TempEX():
 						time_s = capture.get(cv2.CAP_PROP_POS_MSEC)/1000
 						self.count = self.count + 1
 						if self.debug:
-							if self.count==31:
+							if self.count==12374:
 								temp=self.frame_pro(frame,time_s)
 								if self.save_all_frame or self.save_key_frame:
 									self.save_frame(frame, temp, time_s)
@@ -314,9 +323,95 @@ class TempEX():
 		plt.imshow(ROI)
 		plt.title("ROI")
 		plt.show()
+	def selct_best(self,datas,ocr_data,ocr_sore,old_data):
+		if old_data is None:
+			datas.append(ocr_data)
+			nums=[]
+			for i in datas:
+				num=datas.count(i)
+				nums.append(num)
+			temp=datas[np.argmax(nums)]
+			num = nums[np.argmax(nums)]
+			if temp == ocr_data:
+				score = ocr_sore
+				self.logger.info("++++++++++ %d frame final robust ocr result: %.4f, score: %.4f, repeat num: %d" % (
+					self.count, temp, score, num))
+			else:
+				score = num/len(datas)
+				self.logger.info("++++++++++ %d frame final  ocr result: %.4f, score: %.4f, repeat num: %d" % (
+					self.count, temp, score, num))
 
 
-	def temp_read(self,frame,time_s):
+		else:
+			score=0
+			if ocr_data in datas:
+				dif_ratio=abs(ocr_data-old_data)/old_data
+				if dif_ratio<self.max_dif_ratio:
+					temp=ocr_data
+					score=1
+					self.logger.info("++++++++++ %d frame final robust ocr result: %.4f, score: %.4f, dif_ratio: %.4f" % (self.count, temp, score,dif_ratio))
+			if not score==1:
+				datas.append(ocr_data)
+				diff=[i-old_data for i in datas]
+				temp=datas[np.argmin(diff)]
+				if temp==ocr_data:
+					score=ocr_sore
+				else:
+					score=0.5
+				dif_ratio = abs(temp - old_data) / old_data
+				if dif_ratio<self.max_dif_ratio:
+					self.logger.info("---------- %d frame final closest ocr result: %.4f, score: %.4f, dif_ratio: %.4f" % (self.count, temp, score,dif_ratio))
+				else:
+					score = 0
+					self.logger.warning(
+						"********** attention!! %d frame abnormal ocr result: %.4f, score: %.4f,dif_ratio: %.4f >  %.4f, please check" % (self.count, temp, score,dif_ratio,self.max_dif_ratio))
+		return temp, score
+
+	def tesocr_model(self,frame):
+
+
+		self.ROI_indexs.remove(self.prefer_ROI)
+		ROI_indexs = [self.prefer_ROI] + self.ROI_indexs
+		self.ROI_indexs = ROI_indexs
+
+
+		flag = True
+		scores = []
+
+		temps = []
+		i = 0
+		while flag and i < len(ROI_indexs):
+			index_ROI = ROI_indexs[i]
+			if i > 0:
+				self.logger.warning("-- change ROI to ROI%d" % index_ROI)
+			i = i + 1
+			ROI_cor = [self.y1[index_ROI], self.y2[index_ROI], self.x1[index_ROI], self.x2[index_ROI]]
+			ROI = frame[ROI_cor[0]:ROI_cor[1], ROI_cor[2]:ROI_cor[3]]
+			ROI = cv2.cvtColor(ROI, cv2.COLOR_BGR2GRAY)
+			ret2, ROI = cv2.threshold(ROI, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+
+			for psm_num in [6,7,8,13]:
+				config = '--psm '+str(psm_num)+' --oem 3 -c tessedit_char_whitelist=.0123456789'
+				try:
+					data = pytesseract.image_to_string(ROI, lang='eng',config=config)[:-1]
+					self.logger.debug("-- %d frame pytesseract ocr --psm %d result: %s" % (self.count, psm_num, data))
+					pattern = re.compile(r"^\d+\.\d")
+					res = re.findall(pattern, data)
+					data=res[0]
+
+					temps.append(float(data))
+					scores.append(1)
+
+				except:
+					self.logger.warning("ocr error, switch psm")
+					scores.append(0)
+					if self.debug:
+						self.draw_ROI(ROI, ROI, ROI_cor)
+
+
+		return temps, scores
+
+	def cnocr_read(self,frame,time_s):
 		#plt.imshow(frame)
 		#plt.show()
 		#print(self.count)
@@ -346,50 +441,50 @@ class TempEX():
 			try:
 				outs = self.ocr.ocr(ROI)
 				if outs is None:
-					self.logger.warning("ocr result None, switch ROI")
+					self.logger.warning("cnocr result None, switch ROI")
 					if self.debug:
 						self.draw_ROI(ROI, ROI, ROI_cor)
 					continue
 				else:
 					num = len(outs)
 			except:
-				self.logger.warning("ocr error, switch ROI")
+				self.logger.warning("cnocr error, switch ROI")
 				if self.debug:
 					self.draw_ROI(ROI,ROI,ROI_cor)
 				continue
 			if num==0:
-				self.logger.warning("ocr result Null, swicth ROI")
+				self.logger.warning("cnocr result Null, swicth ROI")
 				if self.debug:
 					self.draw_ROI(ROI,ROI,ROI_cor)
 				continue
 			else:
 				if num>1:
-					self.logger.info("-- find %d ocr results"%num)
+					self.logger.info("-- find %d cnocr results"%num)
 				for ii in range(num):
 					out=outs[ii]
 					if ii>0:
-						self.logger.info("-- serach ocr results%d: %s" % (num, out))
+						self.logger.info("-- serach cnocr results%d: %s" % (num, out))
 					temp = out['text']
 					if temp is None:
-						self.logger.warning("temp result none, swicth ocr result")
+						self.logger.warning("temp result none, swicth cnocr result")
 						if self.debug:
 							self.draw_ROI(ROI, ROI, ROI_cor)
 						continue
 					else:
 						pattern = re.compile(r"^\d+\.\d")
 						res = re.findall(pattern, temp)
-						self.logger.debug("-- %d frame ocr result: %s" % (self.count,temp))
+						self.logger.debug("-- %d frame cnocr result: %s" % (self.count,temp))
 						if len(res)==1:
 								temp_f = float(res[0])
 								score = out['score']
 								self.prefer_ROI = index_ROI
 								if ii > 0:
-									self.logger.info("-- ocr result is full correct number, change ROI to %d" % self.prefer_ROI)
+									self.logger.info("-- cnocr result is full correct number, change ROI to %d" % self.prefer_ROI)
 								flag = False
 								break
 
 						else:
-							self.logger.warning("ocr result is not full correct number, try to find number in it")
+							self.logger.warning("cnocr result is not full correct number, try to find number in it")
 							pattern = re.compile(r"\d+.*\d")
 							res=re.findall(pattern,temp)
 							if len(res)>0:
@@ -403,16 +498,16 @@ class TempEX():
 										temp_string=sstr+'.'+temp_re[-1]
 									else:
 										temp_string=temp_re[0]
-										self.logger.warning("ocr find 1 int number, please enlarge ROI")
+										self.logger.warning("cnocr find 1 int number, please enlarge ROI")
 										intflag=1
 
 									temp_fs = float(temp_string)
-									self.logger.info("-- find number %.2f in %s"%(temp_fs,temp_string))
+									self.logger.info("-- cnocrfind number %.2f in %s"%(temp_fs,temp_string))
 									temps.append(temp_fs)
 									scores.append(out['score'])
 									intflags.append(intflag)
 							else:
-								self.logger.warning("no number in ocr result, swicth ocr result")
+								self.logger.warning("no number in cnocr result, swicth ocr result")
 								if self.debug:
 									self.draw_ROI(ROI, ROI, ROI_cor)
 								continue
@@ -442,7 +537,13 @@ class TempEX():
 		return temp_f,score
 
 	def frame_pro(self,frame,time_s):
-		temp_f,score=self.temp_read(frame,time_s)
+		#temp_f,score=self.temp_read(frame,time_s)
+
+
+		temp_f1,score1=self.cnocr_read(frame,time_s)
+		temps, scores = self.tesocr_model(frame)
+		temp_f, score=self.selct_best(temps,temp_f1,score1,self.old_data)
+		self.old_data=temp_f
 		self.r_frame_count=self.r_frame_count+1
 
 		self.logger.debug("frame: %d, time:%f ms: temp:%f, score:%f "%(self.count,time_s*1000,temp_f,score))
@@ -545,7 +646,6 @@ class TempEX():
 if __name__ == '__main__':
 	T1 = time.time()
 	tempv=TempEX()
-	tempv.run()
 	try:
 		tempv.run()
 	except:

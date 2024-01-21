@@ -9,6 +9,10 @@
   "save_key_frame": "1",
   "save_all_frame": "0",
 
+  "max_dif_ratio": "1.1",
+  "tesseract_cmd":"D:\\tll\\temp_extractor\\venv\\Lib\\site-packages\\tesseract\\tesseract",
+
+
   "frame_folder" : "frmae",
   "frame_suffix": ".jpg",
   "plot_temp":"0",
@@ -17,7 +21,7 @@
 
 
   "log"     : "1",
-  "consol_level"     : "debug",
+  "consol_level"     : "info",
   "model_name":"naive_det",
   "version": "1.1",
   "fps": "7"
